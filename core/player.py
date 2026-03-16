@@ -153,7 +153,7 @@ class Player:
         print(f"{self.name} calls KAN with {hand_tiles + [tile]}")
         return True
     
-def declare_concealed_kan(self, tile_index: int) -> bool:
+    def declare_concealed_kan(self, tile_index: int) -> bool:
         """
         Declare a concealed kong (from own hand)
         Can be done in riichi, but will break riichi if it changes your waits
@@ -210,7 +210,7 @@ def declare_concealed_kan(self, tile_index: int) -> bool:
         Declare riichi if conditions are met
         Returns True if successful
         """
-        can_declare,reason = check_riichi_conditions()
+        can_declare,reason = self.check_riichi_conditions()
         if can_declare:
             print(f"{self.name} declares riichi")
             return True
