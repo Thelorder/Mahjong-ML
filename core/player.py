@@ -283,7 +283,15 @@ class Player:
         if self.state == PlayerState.RIICHI:
             my_discrads = set(self.discards)
             
-            pass # waiting 
+            wait_tiles = self._calculate_wait_tiles()
+            
+            for tile in wait_tiles:
+                if tile in my_discrads:
+                    self.in_furiten = True
+                    self.state = PlayerState.FURITEN
+                    return
+            
+            self.in_furiten = False
     
     def _calculate_wait_tiles(self) -> Set[Tile]:
         """
@@ -305,6 +313,17 @@ class Player:
 
         for dragon in Dragon:
             all_posisble_tiles.append(Tile(Suit.DRAGONS, dragon= dragon))
+            
+        for test_tile in all_posisble_tiles:
+            
+            test_hand = self.hand.copy()
+            test_hand.append(test_tile)
+            test_hand.sort(key=lambda t: (t.suit.value, t.rank or 0))
+            
+            if self._is_complete_hand(test_hand,total_meld_tiles):
+                wait_tiles.add(test_tile)
+        
+        return wait_tiles
             
             
 
