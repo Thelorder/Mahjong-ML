@@ -31,6 +31,9 @@ class Player:
         self.in_furiten: bool = False  
         self.temp_furiten: bool = False
         
+        self.is_in_tenpai: bool = False
+        self.tenpai_wait_tiles: Set[Tile] = set()
+        
         self.points: int = 25000
         self.riichi_stick: int = 0
         self.honba: int = 0
@@ -43,6 +46,8 @@ class Player:
         self.hand.append(tile)
         self._sort_hand()
         print(f"{self.name} draws a tile")
+        
+        self.update_tenpai()
         
     def discard_tile(self,index:int, is_riichi_discard:bool =False) -> False:
         """Discard a tile from hand"""
@@ -60,6 +65,8 @@ class Player:
             self.riichi_declared_index = len(self.discards) - 1
             self.state = PlayerState.RIICHI
             self.points -= self.riichi_bet
+        else:
+            self.update_tenpai()
         
         return tile    
         
@@ -92,6 +99,8 @@ class Player:
             print(f"{self.name} calls CHI with {potential_meld}")
             return True
         
+        self.update_tenpai()
+        
         return False
         
     def call_pon(self,tile:Tile, hand_indices: List[int]) -> bool:
@@ -118,6 +127,8 @@ class Player:
             self.melds.append(potential_meld)
             print(f"{self.name} calls PON with {potential_meld}")
             return True  
+        
+        self.update_tenpai()
         
         return False
     
@@ -151,6 +162,9 @@ class Player:
         # Add to open melds (kong is open)
         self.melds.append(hand_tiles + [tile])
         print(f"{self.name} calls KAN with {hand_tiles + [tile]}")
+        
+        self.update_tenpai()
+        
         return True
     
     def declare_concealed_kan(self, tile_index: int) -> bool:
@@ -233,12 +247,14 @@ class Player:
         if self.points < 1000:
             return False, f"Need 1000 points, have {self.points}"
         
-        if not self.is_tenpai():
+        self.update_tenpai()
+        
+        if not self._check_tenpai():
             return False, "Hand is not tenpai"
         
         return True, "Can declare riichi"
         
-    def is_tenpai(self)->bool:
+    def _check_tenpai(self)->bool:
         """
         Check if hand is tenpai (one tile away from winning)
         Checks if hand can be completed by adding any tile
@@ -272,6 +288,33 @@ class Player:
                 return True
         return False
     
+    def update_tenpai(self):
+        """Check if hand is tenpai and update state accordingly"""
+        was_tenpai = self.is_tenpai_state
+        self.is_tenpai_state = self._check_tenpai()
+        
+        if self.is_tenpai_state:
+            self.tenpai_wait_tiles = self._calculate_wait_tiles()
+            
+            # Update state based on conditions
+            if self.riichi_declared:
+                self.state = PlayerState.RIICHI
+            elif self.in_furiten:
+                self.state = PlayerState.FURITEN
+            else:
+                self.state = PlayerState.TENPAI
+        else:
+            self.tenpai_wait_tiles = set()
+            if not self.riichi_declared and not self.in_furiten:
+                self.state = PlayerState.NORMAL
+        
+        # Log state change if it happened
+        if was_tenpai != self.is_tenpai_state:
+            if self.is_tenpai_state:
+                print(f"{self.name} is now TENPAI! Waiting for: {[str(t) for t in self.tenpai_wait_tiles]}")
+            else:
+                print(f"{self.name} is no longer tenpai")
+        
     # ========== Fruiten specific methods ==========
     
     def update_fruiten(self,all_discards:List[List[Tile]]):
