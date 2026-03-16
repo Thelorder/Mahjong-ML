@@ -99,7 +99,7 @@ class Player:
             print(f"{self.name} calls CHI with {potential_meld}")
             return True
         
-        self.update_tenpai()
+        self.update_tenpai( )
         
         return False
         
@@ -456,8 +456,107 @@ class Player:
                 if self._is_complete_hand(remaining, existing_meld_tiles +3):
                     return True
         return False
-            
     
+    def get_wait_tile_display(self) -> str:
+        """Get a string of the current wait tiles"""
+        
+        if not self.tenpai_wait_tiles:
+            return "No waits"
+        
+        waits_by_suit = {}
+        for tile in self.tenpai_wait_tiles:
+            suit_str = tile.suit.value
+            if suit_str not in waits_by_suit:
+                waits_by_suit[suit_str] = []
+            waits_by_suit[suit_str].append(str(tile))
+        
+        result = []
+        for suit, tile in waits_by_suit.items():
+            result.append(f"{suit}:{' '.join(tiles)}")
+        return" | ".join(result)       
+    
+    def show_hand(self, hide_last: bool = False) -> str:
+        """Display hand as string"""
+        if not self.hand:
+            return "Empty hand"
+        
+        if hide_last and self.state == PlayerState.RIICHI:
+            # Hide one tile when in riichi (for display)
+            return ' '.join(str(t) for t in self.hand[:-1]) + " ?"
+        
+        return ' '.join(str(tile) for tile in self.hand)
+
+    def show_melds(self) -> str:
+        """Display open melds as string"""
+        if not self.melds:
+            return "No open melds"
+        return ' | '.join(' '.join(str(t) for t in meld) for meld in self.melds)
+
+    def show_concealed_melds(self) -> str:
+        """Display concealed melds (kan) as string"""
+        if not self.concealed_melds:
+            return ""
+        return ' | '.join(' '.join(str(t) for t in meld) for meld in self.concealed_melds)
+
+    def show_discards(self) -> str:
+        """Display discards with riichi indicators"""
+        if not self.discards:
+            return "No discards"
+        
+        result = []
+        for i, (tile, indicator) in enumerate(zip(self.discards, self.discard_indicators)):
+            if indicator == "R":
+                result.append(f"*{tile}*")  # Highlight riichi discards
+            else:
+                result.append(str(tile))
+            
+            # Add line breaks every 6 tiles for readability
+            if (i + 1) % 6 == 0 and i + 1 < len(self.discards):
+                result.append("\n         ")
+        
+        return ' '.join(result)
+
+    def get_state_indicator(self) -> str:
+        """Get visual indicator for player state"""
+        if self.state == PlayerState.RIICHI:
+            return "🎋"  # Riichi bamboo symbol
+        elif self.state == PlayerState.FURITEN:
+            return "⚠️"  # Furiten warning
+        elif self.state == PlayerState.TENPAI:
+            return "🎯" # Tenpai targe
+        return ""
+
+    def __str__(self):
+        return f"{self.name} ({self.wind.value}) {self.get_state_indicator()}"
+    
+    def check_win(self, tile:Optional[Tile] = None, from_discard: bool = True) -> bool:
+        """
+        Check if current hand is a winning hand
+        If tile is provided, check with that tile added
+        """
+        hand_copy = self.hand.copy()
+        
+        if tile:
+            hand_copy.append(tile)
+            
+        total_meld_tiles = sum(len(meld) for meld in self.melds) + sum(len(meld) for meld in self.concealed_melds)
+        total_tiles = len(hand_copy) + total_meld_tiles
+        
+        if total_tiles != 14:
+            return False
+        
+        # Check furiten (can't win on discard if in furiten)
+        if from_discard and tile and self.in_furiten:
+            if tile in self.discards:
+                print(f"{self.name} is in furiten, cannot win on discard")
+                return False
+        
+        # Sort the hand for checking
+        hand_copy.sort(key=lambda t: (t.suit.value, t.rank or 0))
+        
+        # Check if hand is complete (4 melds + 1 pair)
+        return self._is_complete_hand(hand_copy, total_meld_tiles)            
+        
 
 # ========== SIMPLE TEST ==========
 if __name__ == "__main__":
