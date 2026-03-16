@@ -244,6 +244,78 @@ class Player:
         Checks if hand can be completed by adding any tile
         """
         
+        total_meld_tiles = sum(len(meld) for meld in self.melds) + sum(len(meld) for meld in self.concealed_melds)
+        hand_tiles_needed = 14 - total_meld_tiles
+        
+        if len(self.hand) != hand_tiles_needed -1:
+            return False
+        
+        all_possible_tiles = []
+        
+        for suit in [Suit.BAMBOO,Suit.CHARACTERS,Suit.DOTS]:
+            for rank in range(1,10):
+                all_possible_tiles.append(Tile(suit,rank=rank))
+                
+        for wind in Wind:
+            all_possible_tiles.append(Tile(Suit.WINDS, wind=wind))
+        
+        for dragon in Dragon:
+            all_possible_tiles.append(Tile(Suit.DRAGONS,dragon=dragon))
+            
+        for test_tile in all_possible_tiles:
+            
+            test_hand = self.hand.copy()
+            test_hand.append(test_tile)
+            test_hand.sort(key=lambda t: (t.suit.value, t.rank or 0))
+            
+            if self._is_complete_hand(test_hand,total_meld_tiles):
+                return True
+        return False
+    
+    # ========== Fruiten specific methods ==========
+    
+    def update_fruiten(self,all_discards:List[List[Tile]]):
+        """
+        Update furiten status based on all players' discards
+        Furiten is when yu are waiting to draw the winning tile
+        """
+        
+        if self.state == PlayerState.RIICHI:
+            my_discrads = set(self.discards)
+            
+            pass # waiting 
+    
+    def _calculate_wait_tiles(self) -> Set[Tile]:
+        """
+        Calculate which tiles would complete the hand
+        Returns set of tiles that would make the hand winning
+        """
+        
+        wait_tiles = set()
+        total_meld_tiles = sum(len(meld) for meld in self.melds) + sum(len(meld) for meld in self.concealed_melds)
+        
+        all_posisble_tiles = []
+        
+        for suit in [Suit.BAMBOO,Suit.CHARACTERS, Suit.DOTS]:
+            for rank in range(1,10):
+                all_posisble_tiles.append(Tile(suit, rank = rank))
+        
+        for wind in Wind:
+            all_posisble_tiles.append(Tile(Suit.WINDS, wind = wind))
+
+        for dragon in Dragon:
+            all_posisble_tiles.append(Tile(Suit.DRAGONS, dragon= dragon))
+            
+            
+
+    def is_in_furiten(self,tile:Tile) -> bool:
+        """Check if player is in furiten for a specific tile"""
+        if not self.is_in_furiten:
+            return False
+        
+        return tile in self.discards   
+        
+        
     # ========== Hand Managment ==========
     
     def _sort_hand(self):
@@ -283,6 +355,46 @@ class Player:
     def count_tile(self, tile: Tile) -> int:
         """Count occurrences of a specific tile in hand"""
         return sum(1 for t in self.hand if t == tile)
+    
+    def _is_complete_hand(self, tiles:List[Tile], existing_meld_tiles:int =0) -> bool:
+        """
+        Checks if a list of tiles forms a complete Mahjong hand
+        """
+        if len(tiles) + existing_meld_tiles != 14:
+            return False
+        
+        if len (tiles) == 0:
+            return existing_meld_tiles == 14
+        
+        if len(tiles) == 2:
+            return tiles[0] == tiles[1]
+        
+        if len(tiles) >= 3 and tiles[0] == tiles[1] == tiles[2]:
+            if self._is_complete_hand(tiles[3:],existing_meld_tiles +3):
+                return True    
+
+        if tiles[0].suit in [Suit.BAMBOO, Suit.CHARACTERS, Suit.DOTS]:
+            rank = tiles[0].rank
+            
+            found = False
+            sequience_indices = []
+            
+            for i,tile in enumerate(tiles[:5]):
+                if(tile.suit == tiles[0].suit and tile.rank == rank + len(sequience_indices)):
+                    sequience_indices.append(i)
+                    if len(sequience_indices) == 3:
+                        found = True
+                        break   
+                    
+            if found:
+                remaining = []
+                for i,tile in enumerate(tiles):
+                    if i not in sequience_indices:
+                        remaining.append(tile)
+                if self._is_complete_hand(remaining, existing_meld_tiles +3):
+                    return True
+        return False
+            
     
 
 # ========== SIMPLE TEST ==========
