@@ -93,19 +93,19 @@ class Wall:
     def __str__(self):
         return f"Wall: {len(self.tiles)} tiles, Dead wall: {len(self.dead_wall)} tiles"
     
-if __name__ == "__main__":
-    # Simple test
-    wall = Wall()
-    print(f"Created wall with {wall.get_wall_size()} tiles")
+# if __name__ == "__main__":
+#     # Simple test
+#     wall = Wall()
+#     print(f"Created wall with {wall.get_wall_size()} tiles")
     
-    # Test drawing
-    tile = wall.draw_tile()
-    print(f"Drew tile: {tile}")
-    print(f"Remaining: {wall.get_wall_size()} tiles")
+#     # Test drawing
+#     tile = wall.draw_tile()
+#     print(f"Drew tile: {tile}")
+#     print(f"Remaining: {wall.get_wall_size()} tiles")
     
-    # Test dead wall
-    wall.set_dead_wall(14)
-    print(f"\nAfter setting dead wall:")
-    print(f"Main wall: {wall.get_wall_size()} tiles")
-    print(f"Dead wall: {wall.get_dead_wall_size()} tiles")
+#     # Test dead wall
+#     wall.set_dead_wall(14)
+#     print(f"\nAfter setting dead wall:")
+#     print(f"Main wall: {wall.get_wall_size()} tiles")
+#     print(f"Dead wall: {wall.get_dead_wall_size()} tiles")
         

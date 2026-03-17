@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple, Set
 from enum import Enum
 from tile import Tile, Suit, Wind,Dragon
 from utils.helpers import is_valid_sequence, is_valid_triplet, is_valid_quad
+from wall import Wall
 
 class PlayerState(Enum):
     """Current State of player"""
@@ -31,7 +32,7 @@ class Player:
         self.in_furiten: bool = False  
         self.temp_furiten: bool = False
         
-        self.is_in_tenpai: bool = False
+        self.is_tenpai: bool = False
         self.tenpai_wait_tiles: Set[Tile] = set()
         
         self.points: int = 25000
@@ -58,11 +59,16 @@ class Player:
         self.discards.append(tile)
         self.discard_indicators.append("R" if is_riichi_discard else " ")
         
-        print(f"{self.name} discards {tile}{' (Riichi discard)' if is_riichi_discard else ''}")
+        print(f"{self.name} discards {tile}{' (Riichi)' if is_riichi_discard else ''}")
         
         if is_riichi_discard:
+            remaining = self.hand.copy()
+            remaining.sort(key=lambda t: (t.suit.value, t.rank or 0))
+            if not self._is_tenpai_13_tiles(remaining):
+                print("Warning: riichi discard does not leave tenpai")
             self.riichi_declared = True
-            self.riichi_declared_index = len(self.discards) - 1
+            self.riichi_discard_index  = len(self.discards) - 1
+            self.points -= self.riichi_bet
             self.state = PlayerState.RIICHI
             self.points -= self.riichi_bet
         else:
@@ -71,6 +77,14 @@ class Player:
         return tile    
         
     # ========== Melding (Calls) ==========
+    def _draw_kan_replacemnet(self,wall:Wall):
+        """Draw replacement tile from dead wall after any kan"""
+        if wall.get_dead_wall_size() == 0:
+            print("Warning: dead wall empty — cannot draw replacement")
+            return
+        replacement = wall.draw_tile(from_dead_wall=True)
+        self.draw_tile(replacement)  # this also sorts + updates tenpai
+        print(f"{self.name} draws replacement after kan: {replacement}")
     
     def call_chi(self,tile:Tile, hand_indices: List[int]) -> bool:
         """ 
@@ -224,14 +238,54 @@ class Player:
         Declare riichi if conditions are met
         Returns True if successful
         """
-        can_declare,reason = self.check_riichi_conditions()
-        if can_declare:
+        can,reason, _ = self.can_declare_riichi()
+        if can:
             print(f"{self.name} declares riichi")
             return True
         else:
             print(f"{self.name} cannot declare Riichi: {reason}")
             return False
+    
+    def can_declare_riichi(self) -> Tuple[bool,str,Optional[List[Tile]]]:
+        """
+        Returns:
+            (can_declare, reason, list_of_safe_discard_tiles_if_yes)
+        """
+        if self.riichi_declared:
+            return False,"Alredy in riichi", None
+
+        if self.melds:  # open melds
+            return False, "Cannot riichi with open melds", None
+
+        if self.points < 1000:
+            return False, f"Need 1000 points, have {self.points}", None
         
+        total_meld_tiles = sum(len(m) for m in self.melds) + sum(len(m) for m in self.concealed_melds)
+        expected_hand_size = 14 - total_meld_tiles
+        
+        if len(self.hand) != expected_hand_size:
+            return False, f"Hand size is {len(self.hand)}, expected {expected_hand_size}", None
+        
+        safe_discards = []
+        
+        for i in range(len(self.hand)):
+            tile_to_discard =self.hand[i]
+            remaining = self.hand[:i] + self.hand[i+1:]
+            if self._is_tenpai_13_tiles(remaining):
+                safe_discards.append(tile_to_discard)
+                
+        if safe_discards:
+            # remove duplicates
+            unique_safe = []
+            seen = set()
+            for t in safe_discards:
+                if str(t) not in seen:
+                    unique_safe.append(t)
+                    seen.add(str(t))
+            return True, "Can declare Riichi", unique_safe
+        else:
+            return False, "No discard leads to tenpai", None
+    
     def check_riichi_conditions(self) ->Tuple[bool,str]:
         """
         Check if player can declare riichi
@@ -290,10 +344,10 @@ class Player:
     
     def update_tenpai(self):
         """Check if hand is tenpai and update state accordingly"""
-        was_tenpai = self.is_tenpai_state
-        self.is_tenpai_state = self._check_tenpai()
+        was_tenpai = self.is_tenpai
+        self.is_tenpai = self._check_tenpai()
         
-        if self.is_tenpai_state:
+        if self.is_tenpai:
             self.tenpai_wait_tiles = self._calculate_wait_tiles()
             
             # Update state based on conditions
@@ -309,12 +363,30 @@ class Player:
                 self.state = PlayerState.NORMAL
         
         # Log state change if it happened
-        if was_tenpai != self.is_tenpai_state:
-            if self.is_tenpai_state:
+        if was_tenpai != self.is_tenpai:
+            if self.is_tenpai:
                 print(f"{self.name} is now TENPAI! Waiting for: {[str(t) for t in self.tenpai_wait_tiles]}")
             else:
                 print(f"{self.name} is no longer tenpai")
-        
+    
+    def _is_tenpai_13_tiles(self, tiles_13: List[Tile]) -> bool:
+        """
+        Checks if a 13-tile hand is tenpai (i.e. can be completed by adding one tile)
+        """
+        total_meld_tiles = sum(len(m) for m in self.melds) + sum(len(m) for m in self.concealed_melds)
+        hand_tiles_needed = 14 - total_meld_tiles
+
+        if len(tiles_13) != hand_tiles_needed - 1:
+            return False
+
+        # Try adding each possible tile and check if it completes the hand
+        for test_tile in self._get_all_possible_tiles():
+            test_hand = tiles_13 + [test_tile]
+            test_hand.sort(key=lambda t: (t.suit.value, t.rank or 0))
+            if self._is_complete_hand(test_hand, total_meld_tiles):
+                return True
+        return False
+    
     # ========== Fruiten specific methods ==========
     
     def update_fruiten(self,all_discards:List[List[Tile]]):
@@ -366,9 +438,7 @@ class Player:
             if self._is_complete_hand(test_hand,total_meld_tiles):
                 wait_tiles.add(test_tile)
         
-        return wait_tiles
-            
-            
+        return wait_tiles         
 
     def is_in_furiten(self,tile:Tile) -> bool:
         """Check if player is in furiten for a specific tile"""
@@ -376,9 +446,20 @@ class Player:
             return False
         
         return tile in self.discards   
-        
-        
+             
     # ========== Hand Managment ==========
+    
+    def _get_all_possible_tiles(self) -> List[Tile]:
+        """Cached or static list of all 34 unique tile types"""
+        tiles = []
+        for suit in [Suit.BAMBOO, Suit.CHARACTERS, Suit.DOTS]:
+            for rank in range(1,10):
+                tiles.append(Tile(suit,rank=rank))
+        for wind in Wind:
+            tiles.append(Tile(Suit.WINDS, wind=wind))
+        for dragon in Dragon:
+            tiles.append(Tile(Suit.DRAGONS, dragon=dragon))
+        return tiles
     
     def _sort_hand(self):
         """Sort hand by suit then rank"""
@@ -418,43 +499,71 @@ class Player:
         """Count occurrences of a specific tile in hand"""
         return sum(1 for t in self.hand if t == tile)
     
-    def _is_complete_hand(self, tiles:List[Tile], existing_meld_tiles:int =0) -> bool:
+    def _is_complete_hand(self, tiles: List[Tile], existing_meld_tiles: int = 0) -> bool:
         """
-        Checks if a list of tiles forms a complete Mahjong hand
+        Checks if tiles + existing melds form a standard winning hand (4 melds + 1 pair)
+        Assumes tiles is already sorted!
         """
-        if len(tiles) + existing_meld_tiles != 14:
+        total_tiles = len(tiles) + existing_meld_tiles
+        if total_tiles != 14:
             return False
-        
-        if len (tiles) == 0:
-            return existing_meld_tiles == 14
-        
-        if len(tiles) == 2:
-            return tiles[0] == tiles[1]
-        
-        if len(tiles) >= 3 and tiles[0] == tiles[1] == tiles[2]:
-            if self._is_complete_hand(tiles[3:],existing_meld_tiles +3):
-                return True    
 
-        if tiles[0].suit in [Suit.BAMBOO, Suit.CHARACTERS, Suit.DOTS]:
-            rank = tiles[0].rank
-            
-            found = False
-            sequience_indices = []
-            
-            for i,tile in enumerate(tiles[:5]):
-                if(tile.suit == tiles[0].suit and tile.rank == rank + len(sequience_indices)):
-                    sequience_indices.append(i)
-                    if len(sequience_indices) == 3:
-                        found = True
-                        break   
-                    
-            if found:
-                remaining = []
-                for i,tile in enumerate(tiles):
-                    if i not in sequience_indices:
-                        remaining.append(tile)
-                if self._is_complete_hand(remaining, existing_meld_tiles +3):
+        # Base case: nothing left → success only if we used exactly 14 tiles
+        if len(tiles) == 0:
+            return True
+
+        # Try to find the janto (pair) — we need exactly one
+        for i in range(len(tiles) - 1):
+            if tiles[i] == tiles[i + 1]:
+                # Remove pair, recurse on the rest (must be pure melds)
+                remaining = tiles[:i] + tiles[i+2:]
+                if self._check_melds_only(remaining, existing_meld_tiles + 2):
                     return True
+
+        return False
+
+    def _check_melds_only(self, tiles: List[Tile], counted_so_far: int) -> bool:
+        """Recursive check that remaining tiles form melds only (no more pair needed)"""
+        n = len(tiles)
+        if n == 0:
+            return counted_so_far == 14
+
+        if n < 3:
+            return False
+
+        first = tiles[0]
+
+        # --- Triplet (pon) ---
+        if n >= 3 and tiles[1] == first and tiles[2] == first:
+            if self._check_melds_only(tiles[3:], counted_so_far + 3):
+                return True
+
+        # --- Kan (open/concealed) — treat as 4-of-a-kind ---
+        if n >= 4 and tiles[1] == first and tiles[2] == first and tiles[3] == first:
+            if self._check_melds_only(tiles[4:], counted_so_far + 4):
+                return True
+
+        # --- Sequence (chow) — only for suited tiles ---
+        if first.suit in (Suit.BAMBOO, Suit.CHARACTERS, Suit.DOTS) and first.rank is not None:
+            r = first.rank
+            found_indices = [0]  # first tile used
+
+            pos = 1
+            needed = [r + 1, r + 2]
+
+            while pos < n and len(found_indices) < 3:
+                t = tiles[pos]
+                if t.suit == first.suit and t.rank == needed[len(found_indices) - 1]:
+                    found_indices.append(pos)
+                    pos += 1
+                else:
+                    pos += 1
+
+            if len(found_indices) == 3:
+                remaining = [tiles[j] for j in range(n) if j not in found_indices]
+                if self._check_melds_only(remaining, counted_so_far + 3):
+                    return True
+
         return False
     
     def get_wait_tile_display(self) -> str:
