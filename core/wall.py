@@ -1,6 +1,6 @@
 import random
 from typing import List, Optional, Self, Tuple
-from tile import Tile, Suit, Dragon, Wind
+from .tile import Tile, Suit, Dragon, Wind
 
 class Wall:
     """Represents the wall of tiles in the players hand()"""

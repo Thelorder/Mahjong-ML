@@ -1,8 +1,9 @@
 from typing import List, Optional, Tuple, Set
 from enum import Enum
-from tile import Tile, Suit, Wind,Dragon
+
+from .tile import Tile, Suit, Wind, Dragon
+from .wall import Wall
 from utils.helpers import is_valid_sequence, is_valid_triplet, is_valid_quad
-from wall import Wall
 
 class PlayerState(Enum):
     """Current State of player"""
@@ -70,7 +71,6 @@ class Player:
             self.riichi_discard_index  = len(self.discards) - 1
             self.points -= self.riichi_bet
             self.state = PlayerState.RIICHI
-            self.points -= self.riichi_bet
         else:
             self.update_tenpai()
         
@@ -111,9 +111,9 @@ class Player:
             
             self.melds.append(sorted(potential_meld, key=lambda t: (t.suit.value, t.rank or 0)))
             print(f"{self.name} calls CHI with {potential_meld}")
+            self._sort_hand()
+            self.update_tenpai( )
             return True
-        
-        self.update_tenpai( )
         
         return False
         
@@ -140,13 +140,13 @@ class Player:
                 
             self.melds.append(potential_meld)
             print(f"{self.name} calls PON with {potential_meld}")
+            self._sort_hand()
+            self.update_tenpai( )
             return True  
-        
-        self.update_tenpai()
         
         return False
     
-    def call_kan(self,tile:Tile, hand_indices: List[int]) -> bool:
+    def call_kan(self,tile:Tile, hand_indices: List[int], wall: Wall) -> bool:
         """
         Call open kong (quad) using a discarded tile
         Returns True if successful
@@ -178,10 +178,10 @@ class Player:
         print(f"{self.name} calls KAN with {hand_tiles + [tile]}")
         
         self.update_tenpai()
-        
+        self._draw_kan_replacemnet(wall)
         return True
     
-    def declare_concealed_kan(self, tile_index: int) -> bool:
+    def declare_concealed_kan(self, tile_index: int, wall:Wall) -> bool:
         """
         Declare a concealed kong (from own hand)
         Can be done in riichi, but will break riichi if it changes your waits
@@ -202,11 +202,12 @@ class Player:
             # Add to concealed melds (kan is special)
             self.concealed_melds.append(tiles)
             print(f"{self.name} declares concealed KAN with {tiles}")
+            self._draw_kan_replacemnet(wall)
             return True
         
         return False
     
-    def declare_added_kan(self, meld_index: int, tile_index: int) -> bool:
+    def declare_added_kan(self, meld_index: int, tile_index: int, wall:Wall) -> bool:
         """
         Add a tile to an existing pon to make it a kan
         Returns True if successful
@@ -229,6 +230,7 @@ class Player:
         # Add to meld
         meld.append(tile)
         print(f"{self.name} upgrades PON to KAN: {meld}")
+        self._draw_kan_replacement(wall)
         return True
         
     # ========== Riichi-specific methods ==========
@@ -286,86 +288,55 @@ class Player:
         else:
             return False, "No discard leads to tenpai", None
     
-    def check_riichi_conditions(self) ->Tuple[bool,str]:
-        """
-        Check if player can declare riichi
-        Returns (can_declare, reason_if_cannot)
-        """
-
-        if self.riichi_declared:
-            return False,"Already in riichi"
-        
-        if len(self.melds) > 0:
-            return False,"Cannot declare riichi with open melds"
-        
-        if self.points < 1000:
-            return False, f"Need 1000 points, have {self.points}"
-        
-        self.update_tenpai()
-        
-        if not self._check_tenpai():
-            return False, "Hand is not tenpai"
-        
-        return True, "Can declare riichi"
-        
-    def _check_tenpai(self)->bool:
-        """
-        Check if hand is tenpai (one tile away from winning)
-        Checks if hand can be completed by adding any tile
-        """
-        
-        total_meld_tiles = sum(len(meld) for meld in self.melds) + sum(len(meld) for meld in self.concealed_melds)
-        hand_tiles_needed = 14 - total_meld_tiles
-        
-        if len(self.hand) != hand_tiles_needed -1:
-            return False
-        
-        all_possible_tiles = []
-        
-        for suit in [Suit.BAMBOO,Suit.CHARACTERS,Suit.DOTS]:
-            for rank in range(1,10):
-                all_possible_tiles.append(Tile(suit,rank=rank))
-                
-        for wind in Wind:
-            all_possible_tiles.append(Tile(Suit.WINDS, wind=wind))
-        
-        for dragon in Dragon:
-            all_possible_tiles.append(Tile(Suit.DRAGONS,dragon=dragon))
-            
-        for test_tile in all_possible_tiles:
-            
-            test_hand = self.hand.copy()
-            test_hand.append(test_tile)
-            test_hand.sort(key=lambda t: (t.suit.value, t.rank or 0))
-            
-            if self._is_complete_hand(test_hand,total_meld_tiles):
-                return True
-        return False
-    
     def update_tenpai(self):
-        """Check if hand is tenpai and update state accordingly"""
+        """Check if hand is tenpai (or already winning) and update state"""
         was_tenpai = self.is_tenpai
-        self.is_tenpai = self._check_tenpai()
-        
-        if self.is_tenpai:
-            self.tenpai_wait_tiles = self._calculate_wait_tiles()
+
+        total_meld_tiles = sum(len(m) for m in self.melds) + sum(len(m) for m in self.concealed_melds)
+        expected_hand_size = 14 - total_meld_tiles
+
+        if len(self.hand) == expected_hand_size:
+            # Already 14 tiles → check if already winning (tsumo possible)
+            hand_copy = sorted(self.hand, key=lambda t: (t.suit.value, t.rank or 0))
+            is_winning = self._is_complete_hand(hand_copy, total_meld_tiles)
             
-            # Update state based on conditions
-            if self.riichi_declared:
-                self.state = PlayerState.RIICHI
-            elif self.in_furiten:
-                self.state = PlayerState.FURITEN
+            if is_winning:
+                # Already winning — not "tenpai", but ready to win
+                self.is_tenpai = False
+                self.tenpai_wait_tiles = set()
+                self.state = PlayerState.TENPAI   # or add WINNING state later
+                print(f"{self.name} drew a winning tile! (tsumo possible)")
             else:
-                self.state = PlayerState.TENPAI
-        else:
-            self.tenpai_wait_tiles = set()
-            if not self.riichi_declared and not self.in_furiten:
+                # 14 tiles but not winning → not tenpai
+                self.is_tenpai = False
+                self.tenpai_wait_tiles = set()
+                if not self.riichi_declared and not self.in_furiten:
+                    self.state = PlayerState.NORMAL
+
+        elif len(self.hand) == expected_hand_size - 1:
+            # 13 tiles → normal tenpai check
+            self.is_tenpai = self._is_tenpai_13_tiles(self.hand)
+            if self.is_tenpai:
+                self.tenpai_wait_tiles = self._calculate_wait_tiles()
+                if self.riichi_declared:
+                    self.state = PlayerState.RIICHI
+                elif self.in_furiten:
+                    self.state = PlayerState.FURITEN
+                else:
+                    self.state = PlayerState.TENPAI
+            else:
+                self.tenpai_wait_tiles = set()
                 self.state = PlayerState.NORMAL
-        
-        # Log state change if it happened
+        else:
+            # Invalid hand size
+            print(f"Warning: unexpected hand size {len(self.hand)}")
+            self.is_tenpai = False
+            self.tenpai_wait_tiles = set()
+
+        # Log change
         if was_tenpai != self.is_tenpai:
             if self.is_tenpai:
-                print(f"{self.name} is now TENPAI! Waiting for: {[str(t) for t in self.tenpai_wait_tiles]}")
+                print(f"{self.name} is now TENPAI! Waiting for: {self.get_wait_tile_display()}")
             else:
                 print(f"{self.name} is no longer tenpai")
     
@@ -580,8 +551,8 @@ class Player:
             waits_by_suit[suit_str].append(str(tile))
         
         result = []
-        for suit, tile in waits_by_suit.items():
-            result.append(f"{suit}:{' '.join(tiles)}")
+        for suit, tiles_list in waits_by_suit.items():
+            result.append(f"{suit}:{' '.join(tiles_list)}")
         return" | ".join(result)       
     
     def show_hand(self, hide_last: bool = False) -> str:
@@ -669,49 +640,80 @@ class Player:
 
 # ========== SIMPLE TEST ==========
 if __name__ == "__main__":
-    print("Testing Player class...")
-    
-    # Create a player
-    player = Player("Test Player", Wind.EAST)
-    print(f"Created: {player}")
-    
-    # Create some tiles for testing
-    tiles = [
-        Tile(Suit.BAMBOO, rank=1),
-        Tile(Suit.BAMBOO, rank=1),
-        Tile(Suit.BAMBOO, rank=1),
-        Tile(Suit.BAMBOO, rank=2),
-        Tile(Suit.BAMBOO, rank=3),
-        Tile(Suit.BAMBOO, rank=4),
-        Tile(Suit.BAMBOO, rank=5),
-        Tile(Suit.BAMBOO, rank=6),
-        Tile(Suit.BAMBOO, rank=7),
-        Tile(Suit.BAMBOO, rank=8),
-        Tile(Suit.BAMBOO, rank=9),
-        Tile(Suit.CHARACTERS, rank=1),
-        Tile(Suit.CHARACTERS, rank=1),
+    print("=== Simple Mahjong Player + Wall test ===")
+
+    # Create wall and prepare game
+    wall = Wall()
+    wall.set_dead_wall(14)          # standard riichi dead wall
+
+    # Create one player for testing
+    player = Player("南ちゃん", Wind.SOUTH)
+
+    # Give a near-tenpai hand (13 tiles) → waiting on 4p or 7p for pinfu
+    test_tiles = [
+        Tile(Suit.DOTS, 1), Tile(Suit.DOTS, 1),           # pair
+        Tile(Suit.DOTS, 2), Tile(Suit.DOTS, 3), Tile(Suit.DOTS, 4),   # sequence
+        Tile(Suit.DOTS, 5), Tile(Suit.DOTS, 6), Tile(Suit.DOTS, 7),   # sequence
+        Tile(Suit.BAMBOO, 2), Tile(Suit.BAMBOO, 3), Tile(Suit.BAMBOO, 4),
+        Tile(Suit.CHARACTERS, 3), Tile(Suit.CHARACTERS, 4), Tile(Suit.CHARACTERS, 5),
     ]
-    
-    # Draw tiles
-    for tile in tiles:
-        player.draw_tile(tile)
-    
-    print(f"\nHand after drawing: {player.show_hand()}")
-    print(f"Hand size: {player.get_hand_size()}")
-    
-    # Test discard
-    discarded = player.discard_tile(5)
-    print(f"After discarding {discarded}: {player.show_hand()}")
-    print(f"Discards: {player.show_discards()}")
-    
-    # Test riichi check
-    can_riichi, reason = player.check_riichi_conditions()
-    print(f"\nCan declare Riichi? {can_riichi} - {reason}")
-    
-    # Test finding tiles
-    test_tile = Tile(Suit.BAMBOO, rank=1)
-    indices = player.find_tile_indices(test_tile)
-    print(f"Indices of {test_tile}: {indices}")
-    print(f"Count of {test_tile}: {player.count_tile(test_tile)}")
-    
-    print("\nPlayer class test complete!")
+
+    print("Dealing initial 13 tiles...")
+    for t in test_tiles:
+        player.hand.append(t)
+    player._sort_hand()
+
+    print(f"Hand ({len(player.hand)} tiles): {player.show_hand()}")
+    print()
+
+    # Should NOT be tenpai yet (13 tiles, but we check after draw normally)
+    player.update_tenpai()
+    print(f"Is tenpai? {player.is_tenpai}")
+    print(f"Waits: {player.get_wait_tile_display() if player.is_tenpai else 'not yet'}")
+    print()
+
+    # Simulate draw → now 14 tiles
+    drawn = wall.draw_tile()
+    print(f"Drew: {drawn}")
+    player.draw_tile(drawn)
+
+    print(f"After draw ({len(player.hand)} tiles): {player.show_hand()}")
+    print(f"Is tenpai now? {player.is_tenpai}")
+    if player.is_tenpai:
+        print(f"Waiting on: {player.get_wait_tile_display()}")
+    print()
+
+    # Try to declare riichi
+    can, reason, safe = player.can_declare_riichi()
+    print(f"Can declare riichi? {can}  → {reason}")
+    if can:
+        print(f"Safe discards (types): {[str(t) for t in safe]}")
+
+        # Simulate discarding the first safe one with riichi
+        if safe:
+            # Find index of one safe discard (rough)
+            discard_tile = safe[0]
+            indices = player.find_tile_indices(discard_tile)
+            if indices:
+                idx = indices[0]
+                print(f"→ Discarding {discard_tile} (index {idx}) as riichi discard")
+                player.discard_tile(idx, is_riichi_discard=True)
+                print(f"After riichi discard: {player.show_hand(hide_last=True)}")
+                print(f"Riichi declared? {player.riichi_declared}")
+                print(f"State: {player.state}")
+    print()
+
+    # Test win condition on a winning tile (assume we draw a waiting tile)
+    if player.is_tenpai:
+        wait_list = list(player.tenpai_wait_tiles)
+        if wait_list:
+            winning_tile = wait_list[0]   # take first wait
+            print(f"Testing win with {winning_tile} (ron/tsumo)")
+            won = player.check_win(tile=winning_tile, from_discard=False)
+            print(f"check_win() → {won}")
+            if won:
+                print("→ Hand is winning!")
+                print(f"Final hand: {player.show_hand()}")
+            else:
+                print("→ Not recognized as winning → _is_complete_hand still buggy?")
+    print("\nTest finished.")
