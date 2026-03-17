@@ -642,18 +642,16 @@ class Player:
 if __name__ == "__main__":
     print("=== Simple Mahjong Player + Wall test ===")
 
-    # Create wall and prepare game
     wall = Wall()
-    wall.set_dead_wall(14)          # standard riichi dead wall
+    wall.set_dead_wall(14)
 
-    # Create one player for testing
     player = Player("南ちゃん", Wind.SOUTH)
 
-    # Give a near-tenpai hand (13 tiles) → waiting on 4p or 7p for pinfu
+    # Correct 13-tile near-tenpai hand: pinfu wait on 8D
     test_tiles = [
         Tile(Suit.DOTS, 1), Tile(Suit.DOTS, 1),           # pair
-        Tile(Suit.DOTS, 2), Tile(Suit.DOTS, 3), Tile(Suit.DOTS, 4),   # sequence
-        Tile(Suit.DOTS, 5), Tile(Suit.DOTS, 6), Tile(Suit.DOTS, 7),   # sequence
+        Tile(Suit.DOTS, 2), Tile(Suit.DOTS, 3), Tile(Suit.DOTS, 4),
+        Tile(Suit.DOTS, 5), Tile(Suit.DOTS, 6), Tile(Suit.DOTS, 7),   # 567D → waits 8D for 678D
         Tile(Suit.BAMBOO, 2), Tile(Suit.BAMBOO, 3), Tile(Suit.BAMBOO, 4),
         Tile(Suit.CHARACTERS, 3), Tile(Suit.CHARACTERS, 4), Tile(Suit.CHARACTERS, 5),
     ]
@@ -663,57 +661,43 @@ if __name__ == "__main__":
         player.hand.append(t)
     player._sort_hand()
 
-    print(f"Hand ({len(player.hand)} tiles): {player.show_hand()}")
+    print(f"Initial hand ({len(player.hand)} tiles): {player.show_hand()}")
     print()
 
-    # Should NOT be tenpai yet (13 tiles, but we check after draw normally)
+    # Initial check (should be False – 13 tiles, but we normally check after draw)
     player.update_tenpai()
-    print(f"Is tenpai? {player.is_tenpai}")
-    print(f"Waits: {player.get_wait_tile_display() if player.is_tenpai else 'not yet'}")
+    print(f"Initial is_tenpai? {player.is_tenpai}")
     print()
 
-    # Simulate draw → now 14 tiles
-    drawn = wall.draw_tile()
-    print(f"Drew: {drawn}")
-    player.draw_tile(drawn)
+    # Draw a tile that should complete the hand (8D)
+    # For testing, force draw 8D instead of random
+    winning_tile = Tile(Suit.DOTS, 8)
+    print(f"Forcing draw of winning tile: {winning_tile}")
+    player.draw_tile(winning_tile)   # now 14 tiles
 
     print(f"After draw ({len(player.hand)} tiles): {player.show_hand()}")
-    print(f"Is tenpai now? {player.is_tenpai}")
-    if player.is_tenpai:
-        print(f"Waiting on: {player.get_wait_tile_display()}")
+    print(f"Is tenpai or winning? {player.is_tenpai}")
+    print(f"State: {player.state}")
     print()
 
-    # Try to declare riichi
-    can, reason, safe = player.can_declare_riichi()
-    print(f"Can declare riichi? {can}  → {reason}")
-    if can:
-        print(f"Safe discards (types): {[str(t) for t in safe]}")
+    # Check if it recognizes as winning
+    won = player.check_win(from_discard=False)  # tsumo
+    print(f"check_win() after draw → {won}")
+    if won:
+        print("→ Tsumo win detected!")
 
-        # Simulate discarding the first safe one with riichi
-        if safe:
-            # Find index of one safe discard (rough)
-            discard_tile = safe[0]
-            indices = player.find_tile_indices(discard_tile)
-            if indices:
-                idx = indices[0]
-                print(f"→ Discarding {discard_tile} (index {idx}) as riichi discard")
-                player.discard_tile(idx, is_riichi_discard=True)
-                print(f"After riichi discard: {player.show_hand(hide_last=True)}")
-                print(f"Riichi declared? {player.riichi_declared}")
-                print(f"State: {player.state}")
-    print()
+    # If not winning (or to test riichi), try a non-winning draw instead
+    # Comment out the winning_tile part above and uncomment below to test riichi
+    # non_winning = Tile(Suit.DOTS, 9)
+    # print(f"Drawing non-winning tile: {non_winning}")
+    # player.draw_tile(non_winning)
+    # player.update_tenpai()
+    # print(f"After non-winning draw: is_tenpai? {player.is_tenpai}")
+    # if player.is_tenpai:
+    #     print(f"Waits: {player.get_wait_tile_display()}")
+    #     can, reason, safe = player.can_declare_riichi()
+    #     print(f"Can riichi? {can} → {reason}")
+    #     if can:
+    #         print(f"Safe discards: {[str(t) for t in safe]}")
 
-    # Test win condition on a winning tile (assume we draw a waiting tile)
-    if player.is_tenpai:
-        wait_list = list(player.tenpai_wait_tiles)
-        if wait_list:
-            winning_tile = wait_list[0]   # take first wait
-            print(f"Testing win with {winning_tile} (ron/tsumo)")
-            won = player.check_win(tile=winning_tile, from_discard=False)
-            print(f"check_win() → {won}")
-            if won:
-                print("→ Hand is winning!")
-                print(f"Final hand: {player.show_hand()}")
-            else:
-                print("→ Not recognized as winning → _is_complete_hand still buggy?")
     print("\nTest finished.")
