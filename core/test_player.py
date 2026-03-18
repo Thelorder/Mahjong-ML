@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 from .tile import Tile, Suit, Wind, Dragon
 from .wall import Wall
 from .player import Player, PlayerState
+from evaluation.hand_checker import is_complete_hand, is_tenpai, get_wait_tiles, get_all_tiles, sort_key
+from evaluation.melds import is_valid_sequence, is_valid_triplet, is_valid_quad
 
 # ---------------------------------------------------------------------------
 # Shorthand helpers
@@ -540,3 +542,101 @@ class TestEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestMelds(unittest.TestCase):
+
+    def test_valid_sequence(self):
+        self.assertTrue(is_valid_sequence([t(D, 3), t(D, 4), t(D, 5)]))
+
+    def test_invalid_sequence_wrong_suit(self):
+        self.assertFalse(is_valid_sequence([t(D, 3), t(B, 4), t(D, 5)]))
+
+    def test_invalid_sequence_not_consecutive(self):
+        self.assertFalse(is_valid_sequence([t(D, 3), t(D, 5), t(D, 7)]))
+
+    def test_sequence_honours_rejected(self):
+        east  = Tile(Suit.WINDS, wind=Wind.EAST)
+        south = Tile(Suit.WINDS, wind=Wind.SOUTH)
+        west  = Tile(Suit.WINDS, wind=Wind.WEST)
+        self.assertFalse(is_valid_sequence([east, south, west]))
+
+    def test_valid_triplet(self):
+        self.assertTrue(is_valid_triplet([t(D, 5), t(D, 5), t(D, 5)]))
+
+    def test_invalid_triplet_mixed(self):
+        self.assertFalse(is_valid_triplet([t(D, 5), t(D, 5), t(B, 5)]))
+
+    def test_valid_quad(self):
+        self.assertTrue(is_valid_quad([t(C, 9), t(C, 9), t(C, 9), t(C, 9)]))
+
+    def test_invalid_quad_wrong_count(self):
+        self.assertFalse(is_valid_quad([t(C, 9), t(C, 9), t(C, 9)]))
+
+
+class TestHandChecker(unittest.TestCase):
+
+    def test_complete_hand_4_sequences_1_pair(self):
+        tiles = sorted([
+            t(D, 1), t(D, 1),
+            t(D, 2), t(D, 3), t(D, 4),
+            t(D, 5), t(D, 6), t(D, 7),
+            t(B, 2), t(B, 3), t(B, 4),
+            t(C, 3), t(C, 4), t(C, 5),
+        ], key=sort_key)
+        self.assertTrue(is_complete_hand(tiles, 0))
+
+    def test_complete_hand_with_triplet(self):
+        tiles = sorted([
+            t(D, 1), t(D, 1),
+            t(D, 5), t(D, 5), t(D, 5),
+            t(D, 2), t(D, 3), t(D, 4),
+            t(B, 2), t(B, 3), t(B, 4),
+            t(C, 3), t(C, 4), t(C, 5),
+        ], key=sort_key)
+        self.assertTrue(is_complete_hand(tiles, 0))
+
+    def test_incomplete_hand_13_tiles(self):
+        tiles = sorted(TENPAI_13, key=sort_key)
+        self.assertFalse(is_complete_hand(tiles, 0))
+
+    def test_complete_hand_with_open_meld(self):
+        hand_tiles = sorted([
+            t(D, 1), t(D, 1),
+            t(D, 2), t(D, 3), t(D, 4),
+            t(D, 5), t(D, 6), t(D, 7),
+            t(C, 3), t(C, 4), t(C, 5),
+        ], key=sort_key)
+        self.assertTrue(is_complete_hand(hand_tiles, existing_meld_tiles=3))
+
+    def test_tenpai_standard(self):
+        self.assertTrue(is_tenpai(TENPAI_13, 0))
+
+    def test_not_tenpai_random_tiles(self):
+        random_tiles = [t(D, i) for i in [1, 1, 3, 3, 5, 5, 7, 7, 9, 9, 2, 4, 6]]
+        self.assertFalse(is_tenpai(random_tiles, 0))
+
+    def test_tenpai_with_open_meld(self):
+        hand = [
+            t(D, 1), t(D, 1),
+            t(D, 2), t(D, 3), t(D, 4),
+            t(D, 5), t(D, 6), t(D, 7),
+            t(C, 3), t(C, 4),
+        ]
+        self.assertTrue(is_tenpai(hand, existing_meld_tiles=3))
+
+    def test_wait_tiles_two_sided(self):
+        waits = get_wait_tiles(TENPAI_13, 0)
+        self.assertIn(t(C, 2), waits)
+        self.assertIn(t(C, 5), waits)
+
+    def test_no_waits_non_tenpai(self):
+        random_tiles = [t(D, i) for i in [1, 1, 3, 3, 5, 5, 7, 7, 9, 9, 2, 4, 6]]
+        self.assertEqual(len(get_wait_tiles(random_tiles, 0)), 0)
+
+    def test_get_all_tiles_count(self):
+        self.assertEqual(len(get_all_tiles()), 34)
+
+    def test_get_all_tiles_no_duplicates(self):
+        self.assertEqual(len(set(get_all_tiles())), 34)
+        
